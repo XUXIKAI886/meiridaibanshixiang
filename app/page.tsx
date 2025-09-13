@@ -3,11 +3,21 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
+import { AuthSetup } from "@/components/auth/auth-setup"
+import { SyncStatus } from "@/components/sync/sync-status"
+import { authManager, AuthState } from "@/lib/auth-manager"
+import { syncManager } from "@/lib/sync-manager"
+
+// 导入修复工具和测试工具，使其在浏览器中可用
+if (typeof window !== 'undefined') {
+  import("@/lib/fix-corrupted-data")
+  import("@/lib/encoding-test")
+}
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, EyeOff, Trash2, RotateCcw, Sun, Moon } from "lucide-react"
+import { Plus, EyeOff, Trash2, RotateCcw, Sun, Moon, Cloud, CloudOff, Settings } from "lucide-react"
 import { useTheme } from "next-themes"
 
 interface TodoItem {
@@ -23,7 +33,15 @@ export default function DailyTodoApp() {
   const [newTodo, setNewTodo] = useState("")
   const [lastResetDate, setLastResetDate] = useState("")
   const [celebratingId, setCelebratingId] = useState<string | null>(null)
+  const [authState, setAuthState] = useState<AuthState>(authManager.getAuthState())
+  const [showAuthSetup, setShowAuthSetup] = useState(false)
   const { theme, setTheme } = useTheme()
+
+  // 监听认证状态变化
+  useEffect(() => {
+    const unsubscribe = authManager.onAuthStateChange(setAuthState)
+    return unsubscribe
+  }, [])
 
   // 检查是否需要重置任务（新的一天）
   useEffect(() => {
@@ -54,9 +72,21 @@ export default function DailyTodoApp() {
     }
   }, [])
 
-  // 保存任务到本地存储
+  // 保存任务到本地存储并触发同步
   const saveTodos = (updatedTodos: TodoItem[]) => {
     localStorage.setItem("dailyTodos", JSON.stringify(updatedTodos))
+    
+    // 如果已认证，标记为有待同步的更改
+    if (authState.isAuthenticated) {
+      syncManager.markPendingChanges()
+      
+      // 延迟同步，避免频繁的API调用
+      setTimeout(() => {
+        syncManager.manualSync().catch(error => {
+          console.error('Auto sync failed:', error)
+        })
+      }, 2000)
+    }
   }
 
   // 添加新任务
@@ -104,6 +134,11 @@ export default function DailyTodoApp() {
     const updatedTodos = todos.filter((todo) => todo.id !== id)
     setTodos(updatedTodos)
     saveTodos(updatedTodos)
+    
+    // 如果已认证，记录删除操作以便同步时正确处理
+    if (authState.isAuthenticated) {
+      syncManager.markHabitAsDeleted(id)
+    }
   }
 
   // 手动重置所有任务
@@ -190,15 +225,71 @@ export default function DailyTodoApp() {
             )}
           </div>
           
-          <Button 
-            variant="outline" 
-            size="icon" 
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-white/20 dark:border-gray-700/20 hover:bg-white dark:hover:bg-gray-800 shadow-lg"
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* 云端同步状态指示器 */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAuthSetup(!showAuthSetup)}
+              className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-white/20 dark:border-gray-700/20 hover:bg-white dark:hover:bg-gray-800 shadow-lg"
+            >
+              {authState.isAuthenticated ? (
+                <>
+                  <Cloud className="h-4 w-4 mr-2 text-green-600" />
+                  已同步
+                </>
+              ) : (
+                <>
+                  <CloudOff className="h-4 w-4 mr-2 text-gray-400" />
+                  本地模式
+                </>
+              )}
+            </Button>
+
+            {/* 设置按钮 */}
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowAuthSetup(!showAuthSetup)}
+              className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-white/20 dark:border-gray-700/20 hover:bg-white dark:hover:bg-gray-800 shadow-lg"
+              title="云端同步设置"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+
+            {/* 主题切换按钮 */}
+            <Button 
+              variant="outline" 
+              size="icon" 
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-white/20 dark:border-gray-700/20 hover:bg-white dark:hover:bg-gray-800 shadow-lg"
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
+
+        {/* 认证设置界面 */}
+        {showAuthSetup && (
+          <div className="mb-8 space-y-6">
+            <AuthSetup onAuthSuccess={() => setShowAuthSetup(false)} />
+            
+            {/* 详细同步状态 */}
+            {authState.isAuthenticated && (
+              <Card className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm border-white/20 dark:border-gray-700/20 shadow-xl">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Cloud className="w-5 h-5" />
+                    同步状态详情
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <SyncStatus />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
 
         {/* 添加习惯 */}
         <Card className="mb-8 bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm border-white/20 dark:border-gray-700/20 shadow-xl">
@@ -235,9 +326,13 @@ export default function DailyTodoApp() {
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200">今日功课</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    已完成 {completedCount} / {totalCount} 项
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      已完成 {completedCount} / {totalCount} 项
+                    </p>
+                    {/* 同步状态显示 */}
+                    <SyncStatus compact={true} />
+                  </div>
                 </div>
               </div>
               <Button
