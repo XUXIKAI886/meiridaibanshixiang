@@ -1,0 +1,55 @@
+name: 🚀 Deploy 日拱一足
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# 设置 GitHub Pages 权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 只允许一个部署同时运行
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # 构建和部署到 GitHub Pages
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📦 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 📦 设置 Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: 📦 安装依赖
+      run: npm ci
+    
+    - name: 🔧 构建静态网站
+      run: npm run build
+      env:
+        NEXT_PUBLIC_BASE_PATH: /meiridaibanshixiang
+    
+    - name: 📝 设置 GitHub Pages
+      uses: actions/configure-pages@v4
+    
+    - name: 📤 上传到 GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: ./out
+    
+    - name: 🚀 部署到 GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
